@@ -313,7 +313,7 @@ object PlayerManager {
         val audioTracks = mutableListOf<com.castair.protocol.Track>()
         val subtitleTracks = mutableListOf<com.castair.protocol.Track>()
 
-        for (group in tracks.groups) {
+        for ((groupIndex, group) in tracks.groups.withIndex()) {
             val trackGroup = group.mediaTrackGroup
             val trackType = group.type
 
@@ -326,13 +326,13 @@ object PlayerManager {
                         }
                     }
                     androidx.media3.common.C.TRACK_TYPE_AUDIO -> {
-                        val id = "${trackGroup.id}:$i"
+                        val id = "$groupIndex:$i"
                         val label = format.label ?: format.language ?: "Audio ${audioTracks.size + 1}"
                         val lang = format.language
                         audioTracks.add(com.castair.protocol.Track(id = id, label = label, language = lang))
                     }
                     androidx.media3.common.C.TRACK_TYPE_TEXT -> {
-                        val id = "${trackGroup.id}:$i"
+                        val id = "$groupIndex:$i"
                         val label = format.label ?: format.language ?: "Subtitle ${subtitleTracks.size + 1}"
                         val lang = format.language
                         subtitleTracks.add(com.castair.protocol.Track(id = id, label = label, language = lang))
@@ -366,19 +366,20 @@ object PlayerManager {
     fun setAudioTrack(id: String) {
         mainHandler.post {
             val player = exoPlayer ?: return@post
-            val tracks = player.currentTracks
-            for (group in tracks.groups) {
-                if (group.type == androidx.media3.common.C.TRACK_TYPE_AUDIO) {
-                    val trackGroup = group.mediaTrackGroup
-                    for (i in 0 until trackGroup.length) {
-                        val trackId = "${trackGroup.id}:$i"
-                        if (trackId == id) {
-                            val override = androidx.media3.common.TrackSelectionOverride(trackGroup, i)
+            val parts = id.split(":")
+            if (parts.size == 2) {
+                val groupIndex = parts[0].toIntOrNull()
+                val trackIndex = parts[1].toIntOrNull()
+                if (groupIndex != null && trackIndex != null) {
+                    val currentTracks = player.currentTracks
+                    if (groupIndex < currentTracks.groups.size) {
+                        val group = currentTracks.groups[groupIndex]
+                        if (group.type == androidx.media3.common.C.TRACK_TYPE_AUDIO && trackIndex < group.mediaTrackGroup.length) {
+                            val override = androidx.media3.common.TrackSelectionOverride(group.mediaTrackGroup, listOf(trackIndex))
                             player.trackSelectionParameters = player.trackSelectionParameters
                                 .buildUpon()
                                 .setOverrideForType(override)
                                 .build()
-                            return@post
                         }
                     }
                 }
@@ -392,18 +393,20 @@ object PlayerManager {
             val builder = player.trackSelectionParameters.buildUpon()
             if (id == null) {
                 builder.setTrackTypeDisabled(androidx.media3.common.C.TRACK_TYPE_TEXT, true)
+                builder.clearOverridesOfType(androidx.media3.common.C.TRACK_TYPE_TEXT)
             } else {
                 builder.setTrackTypeDisabled(androidx.media3.common.C.TRACK_TYPE_TEXT, false)
-                val tracks = player.currentTracks
-                for (group in tracks.groups) {
-                    if (group.type == androidx.media3.common.C.TRACK_TYPE_TEXT) {
-                        val trackGroup = group.mediaTrackGroup
-                        for (i in 0 until trackGroup.length) {
-                            val trackId = "${trackGroup.id}:$i"
-                            if (trackId == id) {
-                                val override = androidx.media3.common.TrackSelectionOverride(trackGroup, i)
+                val parts = id.split(":")
+                if (parts.size == 2) {
+                    val groupIndex = parts[0].toIntOrNull()
+                    val trackIndex = parts[1].toIntOrNull()
+                    if (groupIndex != null && trackIndex != null) {
+                        val currentTracks = player.currentTracks
+                        if (groupIndex < currentTracks.groups.size) {
+                            val group = currentTracks.groups[groupIndex]
+                            if (group.type == androidx.media3.common.C.TRACK_TYPE_TEXT && trackIndex < group.mediaTrackGroup.length) {
+                                val override = androidx.media3.common.TrackSelectionOverride(group.mediaTrackGroup, listOf(trackIndex))
                                 builder.setOverrideForType(override)
-                                break
                             }
                         }
                     }

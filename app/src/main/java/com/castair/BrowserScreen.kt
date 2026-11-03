@@ -19,21 +19,26 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -44,20 +49,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.castair.protocol.PlayStatus
-
-data class Bookmark(val label: String, val url: String)
-
-val SAMPLE_BOOKMARKS = listOf(
-    Bookmark("Big Buck Bunny", "https://storage.googleapis.com/exoplayer-test-media-0/BigBuckBunny_320x180.mp4"),
-    Bookmark("Mux HLS Stream", "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8"),
-    Bookmark("Google", "https://www.google.com"),
-    Bookmark("Vimeo", "https://vimeo.com"),
-    Bookmark("Twitch", "https://www.twitch.tv")
-)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -201,6 +197,10 @@ fun BrowserScreen(
     Scaffold(
         topBar = {
             TopAppBar(
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    titleContentColor = MaterialTheme.colorScheme.onSurface
+                ),
                 navigationIcon = {
                     if (canGoBack) {
                         TextButton(onClick = {
@@ -208,41 +208,62 @@ fun BrowserScreen(
                                 webViewInstance?.goBack()
                             }
                         }) {
-                            Text("← Back", fontSize = 14.sp)
+                            Text("←", fontSize = 20.sp, color = MaterialTheme.colorScheme.primary)
                         }
                     }
                 },
                 title = {
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         OutlinedTextField(
                             value = inputUrl,
                             onValueChange = { inputUrl = it },
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(52.dp),
                             singleLine = true,
-                            placeholder = { Text("Enter URL or search...") }
+                            shape = RoundedCornerShape(26.dp),
+                            placeholder = { Text("Search or enter URL...", fontSize = 14.sp) },
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)
+                            )
                         )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Button(onClick = {
-                            val target = if (!inputUrl.startsWith("http://") && !inputUrl.startsWith("https://")) {
-                                "https://www.google.com/search?q=${inputUrl}"
-                            } else inputUrl
-                            clearDetectedVideos()
-                            currentUrl = target
-                            inputUrl = target
-                        }) {
-                            Text("Go")
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Button(
+                            onClick = {
+                                val target = if (!inputUrl.startsWith("http://") && !inputUrl.startsWith("https://")) {
+                                    "https://www.google.com/search?q=${inputUrl}"
+                                } else inputUrl
+                                clearDetectedVideos()
+                                currentUrl = target
+                                inputUrl = target
+                            },
+                            modifier = Modifier.height(48.dp),
+                            shape = RoundedCornerShape(24.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.primary
+                            )
+                        ) {
+                            Text("Go", fontSize = 14.sp)
                         }
                     }
                 },
                 actions = {
-                    Button(
+                    FilledTonalButton(
                         onClick = { showDeviceDialog = true },
-                        shape = RoundedCornerShape(8.dp)
+                        shape = RoundedCornerShape(24.dp),
+                        modifier = Modifier.padding(end = 8.dp)
                     ) {
-                        Text(connectedDevice?.name ?: "Connect TV")
+                        Text(
+                            text = connectedDevice?.name ?: "Connect TV",
+                            fontSize = 13.sp,
+                            maxLines = 1
+                        )
                     }
                 }
             )
@@ -253,31 +274,6 @@ fun BrowserScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            LazyRow(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                items(SAMPLE_BOOKMARKS) { bookmark ->
-                    Surface(
-                        shape = RoundedCornerShape(16.dp),
-                        color = MaterialTheme.colorScheme.secondaryContainer,
-                        modifier = Modifier.clickable {
-                            clearDetectedVideos()
-                            currentUrl = bookmark.url
-                            inputUrl = bookmark.url
-                        }
-                    ) {
-                        Text(
-                            text = bookmark.label,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                            fontSize = 12.sp
-                        )
-                    }
-                }
-            }
-
             Box(modifier = Modifier.weight(1f)) {
                 AndroidView(
                     modifier = Modifier.fillMaxSize(),
@@ -307,7 +303,6 @@ fun BrowserScreen(
                                     isUserGesture: Boolean,
                                     resultMsg: Message?
                                 ): Boolean {
-                                    // Block intrusive pop-ups and ad redirects
                                     return false
                                 }
                             }
@@ -373,6 +368,7 @@ fun BrowserScreen(
                     }
                 )
 
+                // Floating Detected Video Banner at bottom
                 selectedVideo?.let { video ->
                     Card(
                         modifier = Modifier
@@ -382,7 +378,8 @@ fun BrowserScreen(
                         colors = CardDefaults.cardColors(
                             containerColor = MaterialTheme.colorScheme.primaryContainer
                         ),
-                        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+                        elevation = CardDefaults.cardElevation(defaultElevation = 10.dp),
+                        shape = RoundedCornerShape(20.dp)
                     ) {
                         Row(
                             modifier = Modifier
@@ -401,23 +398,32 @@ fun BrowserScreen(
                                     }
                             ) {
                                 Text(
-                                    text = "🎬 ${detectedVideos.size} Video${if (detectedVideos.size > 1) "s" else ""} Detected",
-                                    style = MaterialTheme.typography.titleMedium
+                                    text = "${detectedVideos.size} Video${if (detectedVideos.size > 1) "s" else ""} Ready",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
                                 )
+                                Spacer(modifier = Modifier.height(2.dp))
                                 Text(
                                     text = video.title,
                                     style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f),
                                     maxLines = 1
                                 )
                             }
-                            Button(onClick = {
-                                webViewInstance?.evaluateJavascript("document.querySelectorAll('video').forEach(v => v.pause());", null)
-                                if (connectedDevice == null) {
-                                    showDeviceDialog = true
-                                } else {
-                                    clientManager.play(video.url, video.title, video.headers, video.subtitleUrl)
-                                }
-                            }) {
+                            Button(
+                                onClick = {
+                                    webViewInstance?.evaluateJavascript("document.querySelectorAll('video').forEach(v => v.pause());", null)
+                                    if (connectedDevice == null) {
+                                        showDeviceDialog = true
+                                    } else {
+                                        clientManager.play(video.url, video.title, video.headers, video.subtitleUrl)
+                                    }
+                                },
+                                shape = RoundedCornerShape(16.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.primary
+                                )
+                            ) {
                                 Text("Play on TV")
                             }
                         }
@@ -425,19 +431,52 @@ fun BrowserScreen(
                 }
             }
 
+            // Playback Control Panel
             playbackState?.let { state ->
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    shadowElevation = 8.dp
+                    color = MaterialTheme.colorScheme.surface,
+                    tonalElevation = 8.dp,
+                    shadowElevation = 16.dp,
+                    shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
                 ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Text(
-                            text = "TV: ${connectedDevice?.name ?: "Receiver"} (${state.status})",
-                            style = MaterialTheme.typography.labelLarge
-                        )
-                        if (state.title.isNotBlank()) {
-                            Text(text = state.title, style = MaterialTheme.typography.bodyMedium)
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(20.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Connected to ${connectedDevice?.name ?: "TV Receiver"}",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                if (state.title.isNotBlank()) {
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = state.title,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        maxLines = 1
+                                    )
+                                }
+                            }
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.primaryContainer
+                            ) {
+                                Text(
+                                    text = state.status.name,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                            }
                         }
 
                         if (state.status == PlayStatus.PLAYING || state.status == PlayStatus.PAUSED || state.status == PlayStatus.BUFFERING) {
@@ -447,7 +486,7 @@ fun BrowserScreen(
                             val currentPosMs = if (isUserSeeking) seekPositionMs else state.positionMs.toFloat()
                             val maxDurMs = state.durationMs.coerceAtLeast(1L).toFloat()
 
-                            Spacer(modifier = Modifier.height(6.dp))
+                            Spacer(modifier = Modifier.height(12.dp))
                             Column(modifier = Modifier.fillMaxWidth()) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
@@ -465,7 +504,7 @@ fun BrowserScreen(
                                     )
                                 }
 
-                                androidx.compose.material3.Slider(
+                                Slider(
                                     value = currentPosMs.coerceIn(0f, maxDurMs),
                                     onValueChange = { newValue ->
                                         isUserSeeking = true
@@ -476,56 +515,81 @@ fun BrowserScreen(
                                         isUserSeeking = false
                                     },
                                     valueRange = 0f..maxDurMs,
+                                    colors = SliderDefaults.colors(
+                                        thumbColor = MaterialTheme.colorScheme.primary,
+                                        activeTrackColor = MaterialTheme.colorScheme.primary
+                                    ),
                                     modifier = Modifier.fillMaxWidth()
                                 )
                             }
                         }
 
+                        Spacer(modifier = Modifier.height(8.dp))
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
+                            horizontalArrangement = Arrangement.SpaceEvenly
                         ) {
-                            Button(onClick = {
-                                if (state.status == PlayStatus.PLAYING) {
-                                    clientManager.pause()
-                                } else {
-                                    clientManager.resume()
-                                }
-                            }) {
+                            Button(
+                                onClick = {
+                                    if (state.status == PlayStatus.PLAYING) {
+                                        clientManager.pause()
+                                    } else {
+                                        clientManager.resume()
+                                    }
+                                },
+                                shape = RoundedCornerShape(20.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .padding(end = 6.dp)
+                            ) {
                                 Text(if (state.status == PlayStatus.PLAYING) "Pause" else "Play")
                             }
 
-                            Button(onClick = { clientManager.stop() }) {
+                            Button(
+                                onClick = { clientManager.stop() },
+                                shape = RoundedCornerShape(20.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.errorContainer,
+                                    contentColor = MaterialTheme.colorScheme.onErrorContainer
+                                ),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .padding(start = 6.dp)
+                            ) {
                                 Text("Stop")
                             }
                         }
 
                         if (state.status == PlayStatus.PLAYING || state.status == PlayStatus.PAUSED || state.status == PlayStatus.BUFFERING) {
-                            Spacer(modifier = Modifier.height(8.dp))
+                            Spacer(modifier = Modifier.height(12.dp))
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Button(
+                                FilledTonalButton(
                                     onClick = { showQualityDialog = true },
+                                    shape = RoundedCornerShape(16.dp),
                                     modifier = Modifier.weight(1f)
                                 ) {
-                                    Text("⚙️ ${state.qualityHeight?.let { "${it}p" } ?: "Quality"}", fontSize = 12.sp)
+                                    val qText = state.qualityHeight?.let { "${it}p" } ?: "Quality"
+                                    Text(qText, fontSize = 12.sp)
                                 }
 
-                                Button(
+                                FilledTonalButton(
                                     onClick = { showAudioDialog = true },
+                                    shape = RoundedCornerShape(16.dp),
                                     modifier = Modifier.weight(1f)
                                 ) {
-                                    Text("🔊 Audio", fontSize = 12.sp)
+                                    Text("Audio", fontSize = 12.sp)
                                 }
 
-                                Button(
+                                FilledTonalButton(
                                     onClick = { showSubtitleDialog = true },
+                                    shape = RoundedCornerShape(16.dp),
                                     modifier = Modifier.weight(1f)
                                 ) {
-                                    Text("💬 Subtitles", fontSize = 12.sp)
+                                    Text("Subtitles", fontSize = 12.sp)
                                 }
                             }
                         }
@@ -537,15 +601,16 @@ fun BrowserScreen(
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(8.dp),
+                        .padding(12.dp),
                     colors = CardDefaults.cardColors(
                         containerColor = MaterialTheme.colorScheme.errorContainer
-                    )
+                    ),
+                    shape = RoundedCornerShape(16.dp)
                 ) {
                     Text(
-                        text = "⚠️ $err",
+                        text = err,
                         color = MaterialTheme.colorScheme.onErrorContainer,
-                        modifier = Modifier.padding(12.dp),
+                        modifier = Modifier.padding(14.dp),
                         style = MaterialTheme.typography.bodyMedium
                     )
                 }
@@ -556,22 +621,25 @@ fun BrowserScreen(
     if (showVideoListDialog) {
         AlertDialog(
             onDismissRequest = { showVideoListDialog = false },
-            title = { Text("Select Video Stream") },
+            shape = RoundedCornerShape(24.dp),
+            title = { Text("Select Video Stream", style = MaterialTheme.typography.titleLarge) },
             text = {
-                LazyColumn {
+                LazyColumn(modifier = Modifier.height(300.dp)) {
                     items(detectedVideos) { video ->
-                        Row(
+                        Surface(
                             modifier = Modifier
                                 .fillMaxWidth()
+                                .padding(vertical = 4.dp)
+                                .clip(RoundedCornerShape(16.dp))
                                 .clickable {
                                     selectedVideo = video
                                     showVideoListDialog = false
-                                }
-                                .padding(vertical = 10.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween
+                                },
+                            color = if (selectedVideo == video) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
                         ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(video.title, style = MaterialTheme.typography.bodyMedium)
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Text(video.title, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
+                                Spacer(modifier = Modifier.height(2.dp))
                                 Text(video.url, fontSize = 11.sp, maxLines = 1, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
@@ -589,61 +657,87 @@ fun BrowserScreen(
     if (showDeviceDialog) {
         AlertDialog(
             onDismissRequest = { showDeviceDialog = false },
-            title = { Text("Select Castair Receiver") },
+            shape = RoundedCornerShape(24.dp),
+            title = { Text("Connect to TV Receiver", style = MaterialTheme.typography.titleLarge) },
             text = {
                 Column {
-                    Text("Discovered TVs:", style = MaterialTheme.typography.titleSmall)
+                    Text("Discovered TVs:", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
                     Spacer(modifier = Modifier.height(8.dp))
 
                     if (discoveredDevices.isEmpty()) {
-                        Text("Searching local Wi-Fi for TVs...", fontSize = 12.sp)
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(16.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                        ) {
+                            Text(
+                                "Searching local Wi-Fi for TVs...",
+                                modifier = Modifier.padding(16.dp),
+                                fontSize = 13.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     } else {
-                        LazyColumn {
+                        LazyColumn(modifier = Modifier.height(150.dp)) {
                             items(discoveredDevices) { device ->
-                                Row(
+                                Surface(
                                     modifier = Modifier
                                         .fillMaxWidth()
+                                        .padding(vertical = 4.dp)
+                                        .clip(RoundedCornerShape(16.dp))
                                         .clickable {
                                             val videoToPlay = selectedVideo
                                             clientManager.connect(device) {
                                                 videoToPlay?.let { v ->
-                                                    clientManager.play(v.url, v.title, v.headers)
+                                                    clientManager.play(v.url, v.title, v.headers, v.subtitleUrl)
                                                 }
                                             }
                                             showDeviceDialog = false
-                                        }
-                                        .padding(vertical = 8.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween
+                                        },
+                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
                                 ) {
-                                    Text(device.name, style = MaterialTheme.typography.bodyLarge)
-                                    Text("${device.host}:${device.port}", fontSize = 12.sp)
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(14.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(device.name, style = MaterialTheme.typography.bodyLarge)
+                                        Text("${device.host}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
                                 }
                             }
                         }
                     }
 
                     Spacer(modifier = Modifier.height(16.dp))
-                    Text("Or Connect via IP Address:", style = MaterialTheme.typography.titleSmall)
+                    Text("Or Connect via IP Address:", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+                    Spacer(modifier = Modifier.height(8.dp))
                     OutlinedTextField(
                         value = manualIp,
                         onValueChange = { manualIp = it },
                         label = { Text("TV IP Address") },
                         singleLine = true,
+                        shape = RoundedCornerShape(16.dp),
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
             },
             confirmButton = {
-                Button(onClick = {
-                    val manualDevice = CastDevice("TV ($manualIp)", manualIp, 8765)
-                    val videoToPlay = selectedVideo
-                    clientManager.connect(manualDevice) {
-                        videoToPlay?.let { v ->
-                            clientManager.play(v.url, v.title, v.headers)
+                Button(
+                    onClick = {
+                        val manualDevice = CastDevice("TV ($manualIp)", manualIp, 8765)
+                        val videoToPlay = selectedVideo
+                        clientManager.connect(manualDevice) {
+                            videoToPlay?.let { v ->
+                                clientManager.play(v.url, v.title, v.headers, v.subtitleUrl)
+                            }
                         }
-                    }
-                    showDeviceDialog = false
-                }) {
+                        showDeviceDialog = false
+                    },
+                    shape = RoundedCornerShape(16.dp)
+                ) {
                     Text("Connect IP")
                 }
             },
@@ -659,33 +753,38 @@ fun BrowserScreen(
         val qualities = availableTracks?.qualities ?: emptyList()
         AlertDialog(
             onDismissRequest = { showQualityDialog = false },
-            title = { Text("Select Video Quality") },
+            shape = RoundedCornerShape(24.dp),
+            title = { Text("Select Video Quality", style = MaterialTheme.typography.titleLarge) },
             text = {
                 Column {
-                    Row(
+                    Surface(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
                             .clickable {
                                 clientManager.setQuality(null)
                                 showQualityDialog = false
-                            }
-                            .padding(vertical = 12.dp)
+                            },
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
                     ) {
-                        Text("Auto (Adaptive Bitrate)", style = MaterialTheme.typography.bodyMedium)
+                        Text("Auto (Adaptive Bitrate)", modifier = Modifier.padding(14.dp), style = MaterialTheme.typography.bodyMedium)
                     }
 
-                    LazyColumn {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    LazyColumn(modifier = Modifier.height(200.dp)) {
                         items(qualities) { q ->
-                            Row(
+                            Surface(
                                 modifier = Modifier
                                     .fillMaxWidth()
+                                    .padding(vertical = 2.dp)
+                                    .clip(RoundedCornerShape(12.dp))
                                     .clickable {
                                         clientManager.setQuality(q)
                                         showQualityDialog = false
-                                    }
-                                    .padding(vertical = 10.dp)
+                                    },
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
                             ) {
-                                Text("${q}p", style = MaterialTheme.typography.bodyMedium)
+                                Text("${q}p", modifier = Modifier.padding(14.dp), style = MaterialTheme.typography.bodyMedium)
                             }
                         }
                     }
@@ -703,23 +802,26 @@ fun BrowserScreen(
         val audioList = availableTracks?.audio ?: emptyList()
         AlertDialog(
             onDismissRequest = { showAudioDialog = false },
-            title = { Text("Select Audio Track") },
+            shape = RoundedCornerShape(24.dp),
+            title = { Text("Select Audio Track", style = MaterialTheme.typography.titleLarge) },
             text = {
                 if (audioList.isEmpty()) {
                     Text("No additional audio tracks found.", style = MaterialTheme.typography.bodyMedium)
                 } else {
-                    LazyColumn {
+                    LazyColumn(modifier = Modifier.height(200.dp)) {
                         items(audioList) { track ->
-                            Row(
+                            Surface(
                                 modifier = Modifier
                                     .fillMaxWidth()
+                                    .padding(vertical = 2.dp)
+                                    .clip(RoundedCornerShape(12.dp))
                                     .clickable {
                                         clientManager.setAudioTrack(track.id)
                                         showAudioDialog = false
-                                    }
-                                    .padding(vertical = 10.dp)
+                                    },
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
                             ) {
-                                Text(track.label, style = MaterialTheme.typography.bodyMedium)
+                                Text(track.label, modifier = Modifier.padding(14.dp), style = MaterialTheme.typography.bodyMedium)
                             }
                         }
                     }
@@ -737,36 +839,39 @@ fun BrowserScreen(
         val subtitleList = availableTracks?.subtitles ?: emptyList()
         AlertDialog(
             onDismissRequest = { showSubtitleDialog = false },
-            title = { Text("Select Subtitles") },
+            shape = RoundedCornerShape(24.dp),
+            title = { Text("Select Subtitles", style = MaterialTheme.typography.titleLarge) },
             text = {
                 Column {
-                    Row(
+                    Surface(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
                             .clickable {
                                 clientManager.setSubtitleTrack(null)
                                 showSubtitleDialog = false
-                            }
-                            .padding(vertical = 12.dp)
+                            },
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
                     ) {
-                        Text("Subtitles Off", style = MaterialTheme.typography.bodyMedium)
+                        Text("Subtitles Off", modifier = Modifier.padding(14.dp), style = MaterialTheme.typography.bodyMedium)
                     }
 
-                    if (subtitleList.isEmpty()) {
-                        Text("No internal subtitle tracks detected.", style = MaterialTheme.typography.bodySmall)
-                    } else {
-                        LazyColumn {
+                    if (subtitleList.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        LazyColumn(modifier = Modifier.height(200.dp)) {
                             items(subtitleList) { track ->
-                                Row(
+                                Surface(
                                     modifier = Modifier
                                         .fillMaxWidth()
+                                        .padding(vertical = 2.dp)
+                                        .clip(RoundedCornerShape(12.dp))
                                         .clickable {
                                             clientManager.setSubtitleTrack(track.id)
                                             showSubtitleDialog = false
-                                        }
-                                        .padding(vertical = 10.dp)
+                                        },
+                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
                                 ) {
-                                    Text(track.label, style = MaterialTheme.typography.bodyMedium)
+                                    Text(track.label, modifier = Modifier.padding(14.dp), style = MaterialTheme.typography.bodyMedium)
                                 }
                             }
                         }
