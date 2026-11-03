@@ -114,11 +114,12 @@ class CastClientManager {
         }
     }
 
-    fun play(url: String, title: String, headers: Map<String, String> = emptyMap()) {
+    fun play(url: String, title: String, headers: Map<String, String> = emptyMap(), subtitleUrl: String? = null) {
         val item = CastItem(
             url = url,
             title = title,
-            headers = headers
+            headers = headers,
+            subtitleUrl = subtitleUrl
         )
         send(Command.Play(item))
     }

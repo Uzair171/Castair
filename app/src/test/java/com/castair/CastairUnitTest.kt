@@ -84,4 +84,23 @@ class CastairUnitTest {
         assertTrue(VideoSniffer.isVideoMime("application/dash+xml"))
         assertTrue(!VideoSniffer.isVideoMime("text/html"))
     }
+
+    @Test
+    fun testVideoSnifferIsSameVideoUrl() {
+        // Same URL with different query tokens should match
+        assertTrue(VideoSniffer.isSameVideoUrl(
+            "https://cdn.example.com/stream/master.m3u8?token=abc123",
+            "https://cdn.example.com/stream/master.m3u8?token=xyz987"
+        ))
+        // Different video paths on the same domain should NOT match (allowing playlist Next video detection)
+        assertTrue(!VideoSniffer.isSameVideoUrl(
+            "https://cdn.example.com/stream/video1.m3u8",
+            "https://cdn.example.com/stream/video2.m3u8"
+        ))
+        // Different hosts should NOT match
+        assertTrue(!VideoSniffer.isSameVideoUrl(
+            "https://cdn1.example.com/video.mp4",
+            "https://cdn2.example.com/video.mp4"
+        ))
+    }
 }

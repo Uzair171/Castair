@@ -10,15 +10,23 @@ data class DetectedVideo(
     val title: String,
     val mimeType: String? = null,
     val headers: Map<String, String> = emptyMap(),
+    val subtitleUrl: String? = null
 )
 
 class CastairJSBridge(
-    private val onVideoFound: (url: String, title: String) -> Unit
+    private val onVideoFound: (url: String, title: String, subtitleUrl: String?) -> Unit
 ) {
     @JavascriptInterface
     fun onVideoDetected(url: String, title: String) {
         if (!url.isBlank()) {
-            onVideoFound(url, title)
+            onVideoFound(url, title, null)
+        }
+    }
+
+    @JavascriptInterface
+    fun onVideoDetected(url: String, title: String, subtitleUrl: String?) {
+        if (!url.isBlank()) {
+            onVideoFound(url, title, subtitleUrl)
         }
     }
 }
@@ -56,6 +64,7 @@ object VideoSniffer {
             lower.contains("/manifest") ||
             lower.contains("/master.") ||
             lower.contains("/source") ||
+            lower.contains("videoplayback") ||
             lower.contains("mime=video") ||
             lower.contains("type=video") ||
             lower.contains(".m3u8")) {
@@ -98,11 +107,19 @@ object VideoSniffer {
             }
         }
 
-        // Retrieve active session cookies for this URL from WebView CookieManager
+        // Retrieve active session cookies for this URL and pageUrl from WebView CookieManager
         runCatching {
-            val cookies = android.webkit.CookieManager.getInstance().getCookie(url)
-            if (!cookies.isNullOrBlank()) {
-                headers["Cookie"] = cookies
+            val cookieMgr = android.webkit.CookieManager.getInstance()
+            val cookiesUrl = cookieMgr.getCookie(url)
+            val cookiesPage = if (pageUrl.isNotBlank()) cookieMgr.getCookie(pageUrl) else null
+            val combined = listOfNotNull(cookiesUrl, cookiesPage)
+                .flatMap { it.split(";") }
+                .map { it.trim() }
+                .filter { it.isNotBlank() }
+                .distinct()
+                .joinToString("; ")
+            if (combined.isNotBlank()) {
+                headers["Cookie"] = combined
             }
         }
 
@@ -110,10 +127,10 @@ object VideoSniffer {
         val existingReferer = headers.entries.firstOrNull { it.key.equals("Referer", ignoreCase = true) }?.value
 
         if (existingReferer.isNullOrBlank() || existingReferer.contains("google.com/search") || existingReferer.contains("bing.com/search")) {
-            if (!origin.isNullOrBlank()) {
-                headers["Referer"] = if (origin.endsWith("/")) origin else "$origin/"
-            } else if (pageUrl.isNotBlank() && !pageUrl.contains("google.com/search") && !pageUrl.contains("bing.com/search")) {
+            if (pageUrl.isNotBlank() && !pageUrl.contains("google.com/search") && !pageUrl.contains("bing.com/search")) {
                 headers["Referer"] = pageUrl
+            } else if (!origin.isNullOrBlank()) {
+                headers["Referer"] = if (origin.endsWith("/")) origin else "$origin/"
             } else {
                 runCatching {
                     val uri = android.net.Uri.parse(url)
@@ -159,20 +176,69 @@ object VideoSniffer {
         )
     }
 
+    fun isSameVideoUrl(url1: String, url2: String): Boolean {
+        if (url1 == url2) return true
+        if (url1.isBlank() || url2.isBlank()) return false
+        val uri1 = runCatching { java.net.URI(url1) }.getOrNull()
+        val uri2 = runCatching { java.net.URI(url2) }.getOrNull()
+        if (uri1 != null && uri2 != null) {
+            val scheme1 = uri1.scheme ?: "https"
+            val scheme2 = uri2.scheme ?: "https"
+            val host1 = uri1.host ?: ""
+            val host2 = uri2.host ?: ""
+            val path1 = uri1.path ?: ""
+            val path2 = uri2.path ?: ""
+            return scheme1.equals(scheme2, ignoreCase = true) &&
+                   host1.equals(host2, ignoreCase = true) &&
+                   path1.equals(path2, ignoreCase = true) &&
+                   path1.isNotBlank()
+        }
+        return url1.substringBefore("?") == url2.substringBefore("?")
+    }
+
     val JS_ADVANCED_SNIFFER = """
         (function() {
             if (window.__castairInjected) return;
             window.__castairInjected = true;
 
-            function notify(url) {
+            function getSubtitle(v) {
+                if (!v) return null;
+                var tracks = v.getElementsByTagName('track');
+                for (var i = 0; i < tracks.length; i++) {
+                    var t = tracks[i];
+                    if (t.src && (t.kind === 'subtitles' || t.kind === 'captions' || !t.kind)) {
+                        return t.src;
+                    }
+                }
+                return null;
+            }
+
+            function notify(url, subUrl) {
                 if (!url || typeof url !== 'string') return;
                 if (url.indexOf('blob:') === 0 || url.indexOf('data:') === 0) return;
-                if (url.endsWith('.ts') || url.endsWith('.m4s') || url.includes('.ts?') || url.includes('.m4s?')) return;
+                if (url.endsWith('.ts') || url.endsWith('.m4s') || url.indexOf('.ts?') !== -1 || url.indexOf('.m4s?') !== -1) return;
 
                 var lower = url.toLowerCase();
-                if (lower.includes('.m3u8') || lower.includes('.mp4') || lower.includes('.mpd') || lower.includes('.webm') || lower.includes('/hls/') || lower.includes('/stream') || lower.includes('/source')) {
+                var isPotentialVideo = lower.indexOf('.m3u8') !== -1 ||
+                                       lower.indexOf('.mp4') !== -1 ||
+                                       lower.indexOf('.mpd') !== -1 ||
+                                       lower.indexOf('.webm') !== -1 ||
+                                       lower.indexOf('/hls/') !== -1 ||
+                                       lower.indexOf('/stream') !== -1 ||
+                                       lower.indexOf('/source') !== -1 ||
+                                       lower.indexOf('videoplayback') !== -1 ||
+                                       lower.indexOf('mime=video') !== -1 ||
+                                       lower.indexOf('type=video') !== -1;
+
+                if (isPotentialVideo) {
                     if (window.CastairBridge && window.CastairBridge.onVideoDetected) {
-                        window.CastairBridge.onVideoDetected(url, document.title || 'Web Video');
+                        try {
+                            window.CastairBridge.onVideoDetected(url, document.title || 'Web Video', subUrl || null);
+                        } catch(e) {
+                            try {
+                                window.CastairBridge.onVideoDetected(url, document.title || 'Web Video');
+                            } catch(err) {}
+                        }
                     }
                 }
             }
@@ -181,11 +247,12 @@ object VideoSniffer {
                 var videos = document.getElementsByTagName('video');
                 for (var i = 0; i < videos.length; i++) {
                     var v = videos[i];
-                    notify(v.src);
-                    notify(v.currentSrc);
+                    var sub = getSubtitle(v);
+                    var src = v.currentSrc || v.src;
+                    if (src) notify(src, sub);
                     var sources = v.getElementsByTagName('source');
                     for (var j = 0; j < sources.length; j++) {
-                        notify(sources[j].src);
+                        if (sources[j].src) notify(sources[j].src, sub);
                     }
                 }
             }
@@ -193,8 +260,9 @@ object VideoSniffer {
             try {
                 var origPlay = HTMLMediaElement.prototype.play;
                 HTMLMediaElement.prototype.play = function() {
-                    notify(this.src);
-                    notify(this.currentSrc);
+                    var sub = getSubtitle(this);
+                    var src = this.currentSrc || this.src;
+                    if (src) notify(src, sub);
                     return origPlay.apply(this, arguments);
                 };
             } catch(e) {}
@@ -203,8 +271,8 @@ object VideoSniffer {
                 var origFetch = window.fetch;
                 window.fetch = function() {
                     var url = arguments[0];
-                    if (typeof url === 'string') notify(url);
-                    else if (url && url.url) notify(url.url);
+                    var urlStr = (typeof url === 'string') ? url : (url && url.url ? url.url : '');
+                    if (urlStr) notify(urlStr);
                     return origFetch.apply(this, arguments);
                 };
             } catch(e) {}

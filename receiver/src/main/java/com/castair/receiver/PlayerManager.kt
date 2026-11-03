@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import java.util.Locale
 import androidx.annotation.OptIn
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
@@ -59,6 +60,14 @@ object PlayerManager {
 
     private fun buildPlayer(context: Context): ExoPlayer {
         val player = ExoPlayer.Builder(context).build()
+
+        val trackParams = player.trackSelectionParameters.buildUpon()
+            .setSelectUndeterminedTextLanguage(true)
+            .setPreferredTextLanguage(Locale.getDefault().language)
+            .setTrackTypeDisabled(androidx.media3.common.C.TRACK_TYPE_TEXT, false)
+            .build()
+        player.trackSelectionParameters = trackParams
+
         player.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
                 updateState()
@@ -81,7 +90,10 @@ object PlayerManager {
             }
 
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-                Log.e(TAG, "ExoPlayer Error: ${error.message}", error)
+                Log.e(TAG, "ExoPlayer Error [${error.errorCodeName} / ${error.errorCode}]: ${error.message}", error)
+                error.cause?.let { cause ->
+                    Log.e(TAG, "ExoPlayer Root Cause: ${cause.javaClass.name}: ${cause.message}", cause)
+                }
                 _playbackState.value = _playbackState.value.copy(
                     status = PlayStatus.ERROR
                 )
@@ -89,6 +101,33 @@ object PlayerManager {
             }
         })
         return player
+    }
+
+    private fun createTrustAllOkHttpClient(): okhttp3.OkHttpClient {
+        return try {
+            val trustAllCerts = arrayOf<javax.net.ssl.TrustManager>(
+                object : javax.net.ssl.X509TrustManager {
+                    override fun checkClientTrusted(chain: Array<out java.security.cert.X509Certificate>?, authType: String?) {}
+                    override fun checkServerTrusted(chain: Array<out java.security.cert.X509Certificate>?, authType: String?) {}
+                    override fun getAcceptedIssuers(): Array<java.security.cert.X509Certificate> = emptyArray()
+                }
+            )
+
+            val sslContext = javax.net.ssl.SSLContext.getInstance("SSL")
+            sslContext.init(null, trustAllCerts, java.security.SecureRandom())
+
+            okhttp3.OkHttpClient.Builder()
+                .sslSocketFactory(sslContext.socketFactory, trustAllCerts[0] as javax.net.ssl.X509TrustManager)
+                .hostnameVerifier { _, _ -> true }
+                .followRedirects(true)
+                .followSslRedirects(true)
+                .build()
+        } catch (e: Exception) {
+            okhttp3.OkHttpClient.Builder()
+                .followRedirects(true)
+                .followSslRedirects(true)
+                .build()
+        }
     }
 
     fun play(context: Context, item: CastItem) {
@@ -101,10 +140,7 @@ object PlayerManager {
             player.stop()
             player.clearMediaItems()
 
-            val okHttpClient = okhttp3.OkHttpClient.Builder()
-                .followRedirects(true)
-                .followSslRedirects(true)
-                .build()
+            val okHttpClient = createTrustAllOkHttpClient()
 
             val httpDataSourceFactory = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(okHttpClient).apply {
                 val customHeaders = item.headers.toMutableMap()
@@ -123,7 +159,7 @@ object PlayerManager {
                 val referer = refererEntry?.value
                 val origin = originEntry?.value
 
-                if (referer == null || referer.contains("google.com/search") || referer.contains("bing.com/search") || referer == item.url) {
+                if (referer.isNullOrBlank() || referer.contains("google.com/search") || referer.contains("bing.com/search")) {
                     if (!origin.isNullOrBlank()) {
                         customHeaders["Referer"] = if (origin.endsWith("/")) origin else "$origin/"
                     } else {
@@ -138,11 +174,21 @@ object PlayerManager {
                     }
                 }
 
+                val itemHost = runCatching { android.net.Uri.parse(item.url).host }.getOrNull()
+                val refererHost = customHeaders.entries.firstOrNull { it.key.equals("Referer", ignoreCase = true) }?.value?.let {
+                    runCatching { android.net.Uri.parse(it).host }.getOrNull()
+                }
+
+                val isSameSite = itemHost != null && refererHost != null &&
+                    (itemHost.equals(refererHost, ignoreCase = true) || itemHost.endsWith(".$refererHost") || refererHost.endsWith(".$itemHost"))
+
                 if (!customHeaders.containsKey("Accept")) customHeaders["Accept"] = "*/*"
                 if (!customHeaders.containsKey("Accept-Language")) customHeaders["Accept-Language"] = "en-US,en;q=0.9"
-                if (!customHeaders.containsKey("Sec-Fetch-Dest")) customHeaders["Sec-Fetch-Dest"] = "video"
+                if (!customHeaders.containsKey("Sec-Fetch-Dest")) customHeaders["Sec-Fetch-Dest"] = "empty"
                 if (!customHeaders.containsKey("Sec-Fetch-Mode")) customHeaders["Sec-Fetch-Mode"] = "cors"
-                if (!customHeaders.containsKey("Sec-Fetch-Site")) customHeaders["Sec-Fetch-Site"] = "cross-site"
+                if (!customHeaders.containsKey("Sec-Fetch-Site")) {
+                    customHeaders["Sec-Fetch-Site"] = if (isSameSite) "same-origin" else "cross-site"
+                }
 
                 setDefaultRequestProperties(customHeaders)
             }
@@ -155,11 +201,40 @@ object PlayerManager {
             val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory)
 
             val mediaItemBuilder = MediaItem.Builder().setUri(item.url)
-            if (item.url.contains(".m3u8") || item.url.contains("/hls/")) {
-                mediaItemBuilder.setMimeType(androidx.media3.common.MimeTypes.APPLICATION_M3U8)
-            }
-            val mediaItem = mediaItemBuilder.build()
+            val lowerUrl = item.url.lowercase(Locale.ROOT)
 
+            when {
+                lowerUrl.contains(".m3u8") || lowerUrl.contains("/hls/") || lowerUrl.contains("playlist") || lowerUrl.contains("manifest") -> {
+                    mediaItemBuilder.setMimeType(androidx.media3.common.MimeTypes.APPLICATION_M3U8)
+                }
+                lowerUrl.contains(".mpd") || lowerUrl.contains("/dash/") -> {
+                    mediaItemBuilder.setMimeType(androidx.media3.common.MimeTypes.APPLICATION_MPD)
+                }
+                lowerUrl.contains(".mp4") || lowerUrl.contains("mime=video/mp4") -> {
+                    mediaItemBuilder.setMimeType(androidx.media3.common.MimeTypes.VIDEO_MP4)
+                }
+                lowerUrl.contains(".webm") || lowerUrl.contains("mime=video/webm") -> {
+                    mediaItemBuilder.setMimeType(androidx.media3.common.MimeTypes.VIDEO_WEBM)
+                }
+            }
+
+            item.subtitleUrl?.let { subUrl ->
+                if (subUrl.isNotBlank()) {
+                    val mime = if (subUrl.contains(".vtt")) {
+                        androidx.media3.common.MimeTypes.TEXT_VTT
+                    } else {
+                        androidx.media3.common.MimeTypes.APPLICATION_SUBRIP
+                    }
+                    val subtitleConfig = MediaItem.SubtitleConfiguration.Builder(android.net.Uri.parse(subUrl))
+                        .setMimeType(mime)
+                        .setLanguage("en")
+                        .setSelectionFlags(androidx.media3.common.C.SELECTION_FLAG_DEFAULT or androidx.media3.common.C.SELECTION_FLAG_AUTOSELECT)
+                        .build()
+                    mediaItemBuilder.setSubtitleConfigurations(listOf(subtitleConfig))
+                }
+            }
+
+            val mediaItem = mediaItemBuilder.build()
             val mediaSource = mediaSourceFactory.createMediaSource(mediaItem)
 
             player.setMediaSource(mediaSource)

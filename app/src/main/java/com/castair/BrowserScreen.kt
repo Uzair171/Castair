@@ -92,21 +92,56 @@ fun BrowserScreen(
 
     fun isAudioPlaylist(url: String): Boolean {
         val lower = url.lowercase(Locale.ROOT)
-        return lower.contains("/audio/") || lower.contains("_audio") || lower.contains("audio_") || lower.contains("audio.m3u8")
+        return lower.contains("mime=audio") || lower.contains("type=audio") || lower.contains("audio.m3u8")
     }
 
-    fun isMasterPlaylist(url: String): Boolean {
-        val lower = url.lowercase(Locale.ROOT)
-        return lower.contains("master") ||
-               lower.contains("playlist") ||
-               lower.contains("manifest") ||
-               lower.contains("index") ||
-               lower.endsWith(".mp4") ||
-               lower.contains(".mp4?")
+    fun clearDetectedVideos() {
+        detectedVideos = emptyList()
+        selectedVideo = null
     }
 
-    fun addDetectedVideo(url: String, title: String, headers: Map<String, String> = emptyMap()) {
+    fun formatTime(ms: Long): String {
+        if (ms <= 0) return "00:00"
+        val totalSeconds = ms / 1000
+        val minutes = totalSeconds / 60
+        val seconds = totalSeconds % 60
+        val hours = minutes / 60
+        return if (hours > 0) {
+            val remMinutes = minutes % 60
+            String.format(Locale.ROOT, "%d:%02d:%02d", hours, remMinutes, seconds)
+        } else {
+            String.format(Locale.ROOT, "%02d:%02d", minutes, seconds)
+        }
+    }
+
+    fun addDetectedVideo(
+        url: String,
+        title: String,
+        headers: Map<String, String> = emptyMap(),
+        subtitleUrl: String? = null
+    ) {
         if (url.isBlank() || url.startsWith("blob:") || url.startsWith("data:") || isAudioPlaylist(url)) return
+        if (!VideoSniffer.isVideoUrl(url, headers)) return
+
+        val finalHeaders = headers.toMutableMap()
+        if (!finalHeaders.containsKey("Referer") && currentUrl.isNotBlank() && !currentUrl.contains("google.com/search")) {
+            finalHeaders["Referer"] = currentUrl
+        }
+
+        runCatching {
+            val cookieMgr = android.webkit.CookieManager.getInstance()
+            val cookiesUrl = cookieMgr.getCookie(url)
+            val cookiesPage = if (currentUrl.isNotBlank()) cookieMgr.getCookie(currentUrl) else null
+            val combined = listOfNotNull(cookiesUrl, cookiesPage)
+                .flatMap { it.split(";") }
+                .map { it.trim() }
+                .filter { it.isNotBlank() }
+                .distinct()
+                .joinToString("; ")
+            if (combined.isNotBlank()) {
+                finalHeaders["Cookie"] = combined
+            }
+        }
 
         val hostName = runCatching { android.net.Uri.parse(url).host }.getOrNull() ?: ""
         val displayTitle = when {
@@ -119,37 +154,30 @@ fun BrowserScreen(
         val newVideo = DetectedVideo(
             url = url,
             title = displayTitle,
-            headers = headers
+            headers = finalHeaders,
+            subtitleUrl = subtitleUrl
         )
 
-        val newIsMaster = isMasterPlaylist(url)
-
-        // Find existing video from the same domain
         val existingIndex = detectedVideos.indexOfFirst {
-            val existingHost = runCatching { android.net.Uri.parse(it.url).host }.getOrNull()
-            existingHost == hostName
+            VideoSniffer.isSameVideoUrl(it.url, url)
         }
 
         if (existingIndex != -1) {
             val existing = detectedVideos[existingIndex]
-            val existingIsMaster = isMasterPlaylist(existing.url)
-
-            // Prefer master playlist over sub-chunks
-            if (newIsMaster && !existingIsMaster) {
-                val updatedList = detectedVideos.toMutableList()
-                updatedList[existingIndex] = newVideo
-                detectedVideos = updatedList
-                if (selectedVideo == existing) {
-                    selectedVideo = newVideo
-                }
+            val updatedVideo = if (subtitleUrl != null && existing.subtitleUrl == null) {
+                existing.copy(subtitleUrl = subtitleUrl)
+            } else newVideo
+            val updatedList = detectedVideos.toMutableList()
+            updatedList[existingIndex] = updatedVideo
+            detectedVideos = updatedList
+            if (selectedVideo == existing) {
+                selectedVideo = updatedVideo
             }
             return
         }
 
-        detectedVideos = detectedVideos + newVideo
-        if (selectedVideo == null) {
-            selectedVideo = newVideo
-        }
+        detectedVideos = listOf(newVideo) + detectedVideos.take(4)
+        selectedVideo = newVideo
     }
 
     LaunchedEffect(Unit) {
@@ -201,8 +229,7 @@ fun BrowserScreen(
                             val target = if (!inputUrl.startsWith("http://") && !inputUrl.startsWith("https://")) {
                                 "https://www.google.com/search?q=${inputUrl}"
                             } else inputUrl
-                            detectedVideos = emptyList()
-                            selectedVideo = null
+                            clearDetectedVideos()
                             currentUrl = target
                             inputUrl = target
                         }) {
@@ -237,8 +264,7 @@ fun BrowserScreen(
                         shape = RoundedCornerShape(16.dp),
                         color = MaterialTheme.colorScheme.secondaryContainer,
                         modifier = Modifier.clickable {
-                            detectedVideos = emptyList()
-                            selectedVideo = null
+                            clearDetectedVideos()
                             currentUrl = bookmark.url
                             inputUrl = bookmark.url
                         }
@@ -266,12 +292,12 @@ fun BrowserScreen(
 
                             val ua = settings.userAgentString
 
-                            addJavascriptInterface(CastairJSBridge { url, title ->
+                            addJavascriptInterface(CastairJSBridge { url, title, subUrl ->
                                 val defaultHeaders = mapOf(
                                     "Referer" to currentUrl,
                                     "User-Agent" to ua
                                 )
-                                addDetectedVideo(url, title, defaultHeaders)
+                                addDetectedVideo(url, title, defaultHeaders, subUrl)
                             }, "CastairBridge")
 
                             webChromeClient = object : WebChromeClient() {
@@ -291,8 +317,10 @@ fun BrowserScreen(
                                     super.onPageStarted(view, url, favicon)
                                     url?.let {
                                         inputUrl = it
-                                        detectedVideos = emptyList()
-                                        selectedVideo = null
+                                        if (it != currentUrl) {
+                                            currentUrl = it
+                                            clearDetectedVideos()
+                                        }
                                     }
                                     view?.evaluateJavascript(VideoSniffer.JS_ADVANCED_SNIFFER, null)
                                 }
@@ -387,7 +415,7 @@ fun BrowserScreen(
                                 if (connectedDevice == null) {
                                     showDeviceDialog = true
                                 } else {
-                                    clientManager.play(video.url, video.title, video.headers)
+                                    clientManager.play(video.url, video.title, video.headers, video.subtitleUrl)
                                 }
                             }) {
                                 Text("Play on TV")
@@ -410,6 +438,47 @@ fun BrowserScreen(
                         )
                         if (state.title.isNotBlank()) {
                             Text(text = state.title, style = MaterialTheme.typography.bodyMedium)
+                        }
+
+                        if (state.status == PlayStatus.PLAYING || state.status == PlayStatus.PAUSED || state.status == PlayStatus.BUFFERING) {
+                            var isUserSeeking by remember { mutableStateOf(false) }
+                            var seekPositionMs by remember { mutableStateOf(0f) }
+
+                            val currentPosMs = if (isUserSeeking) seekPositionMs else state.positionMs.toFloat()
+                            val maxDurMs = state.durationMs.coerceAtLeast(1L).toFloat()
+
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Column(modifier = Modifier.fillMaxWidth()) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = formatTime(currentPosMs.toLong()),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Text(
+                                        text = formatTime(state.durationMs),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+
+                                androidx.compose.material3.Slider(
+                                    value = currentPosMs.coerceIn(0f, maxDurMs),
+                                    onValueChange = { newValue ->
+                                        isUserSeeking = true
+                                        seekPositionMs = newValue
+                                    },
+                                    onValueChangeFinished = {
+                                        clientManager.seek(seekPositionMs.toLong())
+                                        isUserSeeking = false
+                                    },
+                                    valueRange = 0f..maxDurMs,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
                         }
 
                         Row(
